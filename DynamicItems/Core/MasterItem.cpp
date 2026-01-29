@@ -1,147 +1,106 @@
-// Version: 1.0.0
-// Author: Pilha-DS
-// Creation Date: 2026-01-27 // Last Update: 2026-01-27
-// Description: Structures for the Dynamic Items system
-// Company: Pilha-DS // copyright (c) 2026 Pilha-DS. All Rights Reserved.
+// Dynamic item system // Version 1.0.0 // date: 2026-01-29 // last update: 2026-01-29 // Author: Pilha-DS // Actor: MasterItem
 
 #include "MasterItem.h"
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Engine/Engine.h"
+#include "Components/SpotLightComponent.h"
+#include "Components/WidgetComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/SkeletalMesh.h"
 #include "GameFramework/Character.h"
 #include "GameFramework/PlayerController.h"
 #include "Camera/CameraComponent.h"
-#include "Net/UnrealNetwork.h"
-#include "DrawDebugHelpers.h"
-#include "Materials/Material.h"
 #include "UObject/ConstructorHelpers.h"
-#include "TimerManager.h"
-#include "InputCoreTypes.h"
-#include "Andromeda.h"
+#include "Net/UnrealNetwork.h"
+#include "Components/SceneComponent.h"
 
 AMasterItem::AMasterItem(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
 {
 	PrimaryActorTick.bCanEverTick = true;
 	bReplicates = true;
-	SetReplicatingMovement(true);
+	SetReplicateMovement(true);
 
+	// Criar StaticMeshComponent
 	StaticMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("StaticMeshComponent"));
 	RootComponent = StaticMeshComponent;
-	StaticMeshComponent->SetVisibility(true);
-	StaticMeshComponent->SetHiddenInGame(false);
+	StaticMeshComponent->SetSimulatePhysics(true);
+	StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	StaticMeshComponent->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+	StaticMeshComponent->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+	StaticMeshComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+	StaticMeshComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
 
+	// Criar SkeletalMeshComponent (inicialmente desabilitado)
 	SkeletalMeshComponent = CreateDefaultSubobject<USkeletalMeshComponent>(TEXT("SkeletalMeshComponent"));
 	SkeletalMeshComponent->SetupAttachment(RootComponent);
+	SkeletalMeshComponent->SetSimulatePhysics(true);
+	SkeletalMeshComponent->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+	SkeletalMeshComponent->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
+	SkeletalMeshComponent->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Block);
+	SkeletalMeshComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+	SkeletalMeshComponent->SetCollisionResponseToChannel(ECollisionChannel::ECC_Camera, ECollisionResponse::ECR_Ignore);
 	SkeletalMeshComponent->SetVisibility(false);
-	SkeletalMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+	SkeletalMeshComponent->SetActive(false);
 
+	// Criar CollisionSphere
 	CollisionSphere = CreateDefaultSubobject<USphereComponent>(TEXT("CollisionSphere"));
 	CollisionSphere->SetupAttachment(RootComponent);
-	CollisionSphere->SetSphereRadius(150.0f);
 	CollisionSphere->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
 	CollisionSphere->SetCollisionObjectType(ECollisionChannel::ECC_WorldDynamic);
-	CollisionSphere->SetCollisionResponseToAllChannels(ECR_Ignore);
-	CollisionSphere->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
+	CollisionSphere->SetCollisionResponseToAllChannels(ECollisionResponse::ECR_Ignore);
+	CollisionSphere->SetCollisionResponseToChannel(ECollisionChannel::ECC_Pawn, ECollisionResponse::ECR_Overlap);
+	CollisionSphere->SetSphereRadius(50.0f);
 
-	DirectionalLight = CreateDefaultSubobject<UPointLightComponent>(TEXT("DirectionalLight"));
-	DirectionalLight->SetupAttachment(RootComponent);
-	DirectionalLight->SetVisibility(false);
-	DirectionalLight->SetIntensity(0.0f);
+	// Criar SpotLight
+	SpotLight = CreateDefaultSubobject<USpotLightComponent>(TEXT("SpotLight"));
+	SpotLight->SetupAttachment(RootComponent);
+	SpotLight->SetRelativeRotation(FRotator(-90.0f, 0.0f, 0.0f));
+	SpotLight->SetIntensity(LightSettings.Intensity);
+	SpotLight->SetAttenuationRadius(LightSettings.AttenuationRadius);
+	SpotLight->SetVisibility(false);
 
-	DebugMeshComponent = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("DebugMeshComponent"));
-	DebugMeshComponent->SetupAttachment(RootComponent);
-	DebugMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-	DebugMeshComponent->SetCollisionResponseToAllChannels(ECR_Ignore);
-	DebugMeshComponent->SetVisibility(true);
-	DebugMeshComponent->SetHiddenInGame(true);
-	DebugMeshComponent->SetCastShadow(false);
-	
-	static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDebugMesh(TEXT("/Game/LevelPrototyping/Interactable/Target/Assets/SM_TargetBaseMesh"));
-	if (DefaultDebugMesh.Succeeded())
-	{
-		DebugMeshComponent->SetStaticMesh(DefaultDebugMesh.Object);
-		EditorDebugMesh = DefaultDebugMesh.Object;
-	}
-}
+	// Criar WidgetComponents
+	WidgetInstructionComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("WidgetInstructionComponent"));
+	// WidgetInstruction não é anexado ao RootComponent, tem posição independente
+	WidgetInstructionComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	WidgetInstructionComponent->SetVisibility(false);
+	// Garantir que não está anexado a nenhum componente
+	WidgetInstructionComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
 
-void AMasterItem::PostInitializeComponents()
-{
-	Super::PostInitializeComponents();
-
-	ValidateItemProperties();
-
-	if (Name.IsEmpty())
-	{
-		Destroy();
-		return;
-	}
-
-	SetupMesh();
-	SetupPhysics();
-	SetupCollision();
-	SetupLight();
-
-	CollisionSphere->OnComponentBeginOverlap.AddDynamic(this, &AMasterItem::OnOverlapBegin);
-	CollisionSphere->OnComponentEndOverlap.AddDynamic(this, &AMasterItem::OnOverlapEnd);
+	WidgetPickupComponent = CreateDefaultSubobject<UWidgetComponent>(TEXT("WidgetPickupComponent"));
+	WidgetPickupComponent->SetupAttachment(RootComponent);
+	WidgetPickupComponent->SetWidgetSpace(EWidgetSpace::Screen);
+	WidgetPickupComponent->SetVisibility(false);
 }
 
 void AMasterItem::BeginPlay()
 {
 	Super::BeginPlay();
 
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-	{
-		InitialMeshLocation = MeshComp->GetComponentLocation();
-		InitialMeshRotation = MeshComp->GetComponentRotation();
-		CurrentFloatingLocation = InitialMeshLocation;
-		TargetFloatingLocation = InitialMeshLocation;
-		CurrentRotation = InitialMeshRotation;
-		
-		if (!FloatingSettings.AlwaysFloating)
-		{
-			MeshComp->SetWorldLocation(InitialMeshLocation);
-		}
-	}
+	ValidateItemData();
 
-	if (FloatingSettings.AlwaysFloating)
-	{
-		bIsFloating = true;
-	}
+	// Configurar componentes baseado nos dados do item
+	SetupMesh();
+	SetupCollision();
+	SetupCollisionSphere();
+	SetupLight();
+	SetupWidgets();
 
-	if (RotationSettings.AlwaysRotate && FloatingSettings.AlwaysFloating)
-	{
-		if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-		{
-			CurrentRotation = MeshComp->GetComponentRotation();
-			bIsResettingRotation = false;
-		}
-		else
-		{
-			CurrentRotation = FRotator::ZeroRotator;
-		}
-	}
+	// Salvar posição e rotação originais
+	OriginalLocation = GetActorLocation();
+	OriginalRotation = GetActorRotation();
+	CurrentRotation = OriginalRotation;
+	
+	// Salvar posição fixa do WidgetInstruction no mundo
+	WidgetInstructionWorldLocation = GetActorLocation() + WidgetsSettings.WidgetInstructionPosition;
 
-	UpdatePhysics();
-
-	if (LightSettings.AlwaysLight && FloatingSettings.AlwaysFloating)
+	// Configurar eventos de overlap
+	if (CollisionSphere)
 	{
-		UpdateLight();
-	}
-
-	if (CollisionSphereSettings.ShowOverlappingArea)
-	{
-		UpdateDebugMeshVisibility();
-	}
-
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-	{
-		if (IsValid(MeshComp))
-		{
-			MeshComp->OnComponentHit.AddDynamic(this, &AMasterItem::OnHit);
-		}
+		CollisionSphere->OnComponentBeginOverlap.AddDynamic(this, &AMasterItem::OnCollisionSphereBeginOverlap);
+		CollisionSphere->OnComponentEndOverlap.AddDynamic(this, &AMasterItem::OnCollisionSphereEndOverlap);
 	}
 }
 
@@ -149,577 +108,559 @@ void AMasterItem::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	UpdateFloating(DeltaTime);
-	UpdateRotation(DeltaTime);
-
-	if (ActivePlayer != nullptr)
+	// Remover players inválidos da lista (caso tenham sido destruídos)
+	OverlappingPlayers.RemoveAll([](ACharacter* Player) { return !IsValid(Player); });
+	
+	// Limpar cooldowns expirados e players inválidos do mapa de cooldowns
+	float CurrentTime = GetWorld()->GetTimeSeconds();
+	TArray<ACharacter*> PlayersToRemove;
+	for (auto& CooldownPair : PlayerCooldowns)
 	{
-		bool bIsEPressed = false;
-		
-		if (ACharacter* PlayerCharacter = Cast<ACharacter>(ActivePlayer))
+		if (!IsValid(CooldownPair.Key) || (CurrentTime - CooldownPair.Value) >= OverlapCooldownTime)
 		{
-			if (APlayerController* PlayerController = Cast<APlayerController>(PlayerCharacter->GetController()))
+			PlayersToRemove.Add(CooldownPair.Key);
+		}
+	}
+	for (ACharacter* PlayerToRemove : PlayersToRemove)
+	{
+		PlayerCooldowns.Remove(PlayerToRemove);
+	}
+
+	// Verificar se há pelo menos um player overlapping
+	bool bHasOverlappingPlayers = OverlappingPlayers.Num() > 0;
+	bool bEasyModeActive = BasicInfos.EasyMode;
+
+	// Manter WidgetInstruction em posição fixa no mundo (sempre, independente do estado)
+	if (WidgetInstructionComponent)
+	{
+		WidgetInstructionComponent->SetWorldLocation(WidgetInstructionWorldLocation);
+	}
+
+	// Se EasyMode está ativo ou há players overlapping, ativar efeitos
+	if (bEasyModeActive || bHasOverlappingPlayers)
+	{
+		// Se EasyMode está ativo e não há players, garantir que estados estejam inicializados
+		if (bEasyModeActive && !bHasOverlappingPlayers)
+		{
+			// Inicializar estados apenas uma vez quando EasyMode é ativado
+			if (!bIsFloating)
 			{
-				if (PlayerController)
-				{
-					bIsEPressed = PlayerController->IsInputKeyDown(EKeys::E);
-				}
+				OriginalLocation = GetActorLocation();
+				OriginalRotation = GetActorRotation();
+				CurrentRotation = OriginalRotation;
+				bIsRotating = false;
+				bIsResettingRotation = false;
+				// Garantir que a luz seja ligada no EasyMode
+				bIsLightOn = false; // Resetar para forçar ativação
 			}
 		}
-		else if (APlayerController* PlayerController = Cast<APlayerController>(ActivePlayer))
-		{
-			bIsEPressed = PlayerController->IsInputKeyDown(EKeys::E);
-		}
 
-		if (bIsEPressed && !bWasEPressedLastFrame)
-		{
-			ProcessItemPickup(ActivePlayer);
-		}
-
-		bWasEPressedLastFrame = bIsEPressed;
-	}
-	else
-	{
-		bWasEPressedLastFrame = false;
-	}
-
-	if (CollisionSphereSettings.ShowOverlappingArea && CollisionSphere)
-	{
-		FVector SphereLocation = CollisionSphere->GetComponentLocation();
-		float SphereRadius = CollisionSphere->GetScaledSphereRadius();
+		UpdateFloating(DeltaTime);
+		UpdateRotation(DeltaTime);
+		UpdateLight();
 		
-		DrawDebugSphere(
-			GetWorld(),
-			SphereLocation,
-			SphereRadius,
-			32,
-			FColor::Red,
-			false,
-			-1.0f,
-			0,
-			2.0f
-		);
-	}
-}
-
-void AMasterItem::ValidateItemProperties()
-{
-	if (!STQty.Stackable)
-	{
-		Quantity = 1;
+		// Widgets só aparecem se houver players overlapping
+		UpdateWidgets();
 	}
 	else
 	{
-		if (Quantity <= 0)
+		// Apenas parar de rotacionar, sem resetar
+		if (bIsRotating)
 		{
-			Quantity = 1;
+			bIsRotating = false;
 		}
-		else if (Quantity > STQty.MaxQty)
+
+		// Desativar floating e reativar física se necessário
+		if (bIsFloating)
 		{
-			Quantity = STQty.MaxQty;
+			bIsFloating = false;
+			// Reativar física imediatamente na posição atual
+			if (StaticMeshComponent && StaticMeshComponent->IsVisible())
+			{
+				StaticMeshComponent->SetSimulatePhysics(true);
+			}
+			if (SkeletalMeshComponent && SkeletalMeshComponent->IsVisible())
+			{
+				SkeletalMeshComponent->SetSimulatePhysics(true);
+			}
 		}
+
+		// Desligar luz
+		if (bIsLightOn)
+		{
+			bIsLightOn = false;
+			if (SpotLight)
+			{
+				SpotLight->SetVisibility(false);
+			}
+		}
+
+		// Esconder widgets (UpdateWidgets já verifica o player local)
+		UpdateWidgets();
 	}
 }
 
 void AMasterItem::SetupMesh()
 {
-	if (STModel.MeshType == EItemMeshType::Static)
+	if (STModel.MeshType == EMeshType::Static)
 	{
-		bool bHasMesh = STModel.StaticMesh.ToSoftObjectPath().IsValid();
-		if (bHasMesh)
+		// Verificar se o StaticMesh está configurado
+		if (!STModel.StaticMesh.IsNull())
 		{
 			UStaticMesh* LoadedMesh = STModel.StaticMesh.LoadSynchronous();
-			if (LoadedMesh)
+			if (LoadedMesh && StaticMeshComponent)
 			{
 				StaticMeshComponent->SetStaticMesh(LoadedMesh);
-			}
-			else
-			{
-				bHasMesh = false;
-			}
-		}
-		StaticMeshComponent->SetVisibility(bHasMesh);
-		StaticMeshComponent->SetHiddenInGame(!bHasMesh);
-		StaticMeshComponent->SetWorldScale3D(STModel.Size);
-		SkeletalMeshComponent->SetVisibility(false);
-		SkeletalMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		
-		RootComponent = StaticMeshComponent;
-		
-		if (CollisionSphere && CollisionSphere->GetAttachParent() != RootComponent)
-		{
-			CollisionSphere->SetupAttachment(RootComponent);
-		}
-		if (DirectionalLight && DirectionalLight->GetAttachParent() != RootComponent)
-		{
-			DirectionalLight->SetupAttachment(RootComponent);
-		}
-		if (DebugMeshComponent && DebugMeshComponent->GetAttachParent() != RootComponent)
-		{
-			DebugMeshComponent->SetupAttachment(RootComponent);
-		}
-
-		if (DebugMeshComponent)
-		{
-			if (bHasMesh || CollisionSphereSettings.ShowOverlappingArea)
-			{
-				DebugMeshComponent->SetVisibility(false);
-				DebugMeshComponent->SetHiddenInGame(true);
-				DebugMeshComponent->SetMaterial(0, nullptr);
-			}
-			else
-			{
-				if (EditorDebugMesh.ToSoftObjectPath().IsValid())
-				{
-					UStaticMesh* LoadedDebugMesh = EditorDebugMesh.LoadSynchronous();
-					if (LoadedDebugMesh)
-					{
-						DebugMeshComponent->SetStaticMesh(LoadedDebugMesh);
-					}
-					else
-					{
-						static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDebugMesh(TEXT("/Game/LevelPrototyping/Interactable/Target/Assets/SM_TargetBaseMesh"));
-						if (DefaultDebugMesh.Succeeded())
-						{
-							DebugMeshComponent->SetStaticMesh(DefaultDebugMesh.Object);
-						}
-					}
-				}
-				else
-				{
-					static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDebugMesh(TEXT("/Game/LevelPrototyping/Interactable/Target/Assets/SM_TargetBaseMesh"));
-					if (DefaultDebugMesh.Succeeded())
-					{
-						DebugMeshComponent->SetStaticMesh(DefaultDebugMesh.Object);
-					}
-				}
+				StaticMeshComponent->SetWorldScale3D(STModel.Size);
+				StaticMeshComponent->SetVisibility(true);
+				StaticMeshComponent->SetActive(true);
 				
-				DebugMeshComponent->SetVisibility(true);
-				DebugMeshComponent->SetHiddenInGame(false);
-			}
-		}
-		
-		if (!bHasMesh)
-		{
-			StaticMeshComponent->SetVisibility(false);
-		}
-	}
-	else
-	{
-		bool bHasMesh = STModel.SkeletalMesh.ToSoftObjectPath().IsValid();
-		if (bHasMesh)
-		{
-			USkeletalMesh* LoadedMesh = STModel.SkeletalMesh.LoadSynchronous();
-			if (LoadedMesh)
-			{
-				SkeletalMeshComponent->SetSkeletalMesh(LoadedMesh);
+				// Garantir que StaticMeshComponent seja o RootComponent
+				if (RootComponent != StaticMeshComponent)
+				{
+					// Reattachar componentes ao novo RootComponent
+					if (CollisionSphere)
+					{
+						CollisionSphere->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+						CollisionSphere->SetupAttachment(StaticMeshComponent);
+					}
+					if (SpotLight)
+					{
+						SpotLight->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+						SpotLight->SetupAttachment(StaticMeshComponent);
+					}
+					// WidgetInstruction não é anexado, mantém posição independente
+					if (WidgetPickupComponent)
+					{
+						WidgetPickupComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+						WidgetPickupComponent->SetupAttachment(StaticMeshComponent);
+					}
+					
+					RootComponent = StaticMeshComponent;
+				}
 			}
 			else
 			{
-				bHasMesh = false;
+				UE_LOG(LogTemp, Warning, TEXT("AMasterItem: Falha ao carregar StaticMesh para %s"), *GetName());
 			}
 		}
-		SkeletalMeshComponent->SetVisibility(bHasMesh);
-		SkeletalMeshComponent->SetHiddenInGame(!bHasMesh);
-		SkeletalMeshComponent->SetWorldScale3D(STModel.Size);
-		StaticMeshComponent->SetVisibility(false);
-		StaticMeshComponent->SetCollisionEnabled(ECollisionEnabled::NoCollision);
-		
-		RootComponent = SkeletalMeshComponent;
-		StaticMeshComponent->SetupAttachment(RootComponent);
-		
-		if (CollisionSphere && CollisionSphere->GetAttachParent() != RootComponent)
+		else
 		{
-			CollisionSphere->SetupAttachment(RootComponent);
-		}
-		if (DirectionalLight && DirectionalLight->GetAttachParent() != RootComponent)
-		{
-			DirectionalLight->SetupAttachment(RootComponent);
-		}
-		if (DebugMeshComponent && DebugMeshComponent->GetAttachParent() != RootComponent)
-		{
-			DebugMeshComponent->SetupAttachment(RootComponent);
-		}
-
-		if (DebugMeshComponent)
-		{
-			if (bHasMesh || CollisionSphereSettings.ShowOverlappingArea)
-			{
-				DebugMeshComponent->SetVisibility(false);
-				DebugMeshComponent->SetHiddenInGame(true);
-				DebugMeshComponent->SetMaterial(0, nullptr);
-			}
-			else
-			{
-				if (EditorDebugMesh.ToSoftObjectPath().IsValid())
-				{
-					UStaticMesh* LoadedDebugMesh = EditorDebugMesh.LoadSynchronous();
-					if (LoadedDebugMesh)
-					{
-						DebugMeshComponent->SetStaticMesh(LoadedDebugMesh);
-					}
-					else
-					{
-						static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDebugMesh(TEXT("/Game/LevelPrototyping/Interactable/Target/Assets/SM_TargetBaseMesh"));
-						if (DefaultDebugMesh.Succeeded())
-						{
-							DebugMeshComponent->SetStaticMesh(DefaultDebugMesh.Object);
-						}
-					}
-				}
-				else
-				{
-					static ConstructorHelpers::FObjectFinder<UStaticMesh> DefaultDebugMesh(TEXT("/Game/LevelPrototyping/Interactable/Target/Assets/SM_TargetBaseMesh"));
-					if (DefaultDebugMesh.Succeeded())
-					{
-						DebugMeshComponent->SetStaticMesh(DefaultDebugMesh.Object);
-					}
-				}
-				
-				DebugMeshComponent->SetVisibility(true);
-				DebugMeshComponent->SetHiddenInGame(false);
-			}
+			UE_LOG(LogTemp, Warning, TEXT("AMasterItem: StaticMesh não configurado para %s"), *GetName());
 		}
 		
-		if (!bHasMesh)
+		// Desabilitar SkeletalMeshComponent
+		if (SkeletalMeshComponent)
 		{
 			SkeletalMeshComponent->SetVisibility(false);
+			SkeletalMeshComponent->SetActive(false);
 		}
 	}
-
-	SetupCollisionSphere();
-}
-
-void AMasterItem::SetupPhysics()
-{
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
+	else if (STModel.MeshType == EMeshType::Skeletal)
 	{
-		MeshComp->SetSimulatePhysics(true);
-		MeshComp->SetCollisionEnabled(ECollisionEnabled::QueryAndPhysics);
+		// Verificar se o SkeletalMesh está configurado
+		if (!STModel.SkeletalMesh.IsNull())
+		{
+			USkeletalMesh* LoadedMesh = STModel.SkeletalMesh.LoadSynchronous();
+			if (LoadedMesh && SkeletalMeshComponent)
+			{
+				SkeletalMeshComponent->SetSkeletalMesh(LoadedMesh);
+				SkeletalMeshComponent->SetWorldScale3D(STModel.Size);
+				SkeletalMeshComponent->SetVisibility(true);
+				SkeletalMeshComponent->SetActive(true);
+				
+				// Garantir que SkeletalMeshComponent seja o RootComponent
+				if (RootComponent != SkeletalMeshComponent)
+				{
+					// Reattachar componentes ao novo RootComponent
+					if (CollisionSphere)
+					{
+						CollisionSphere->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+						CollisionSphere->SetupAttachment(SkeletalMeshComponent);
+					}
+					if (SpotLight)
+					{
+						SpotLight->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+						SpotLight->SetupAttachment(SkeletalMeshComponent);
+					}
+					// WidgetInstruction não é anexado, mantém posição independente
+					if (WidgetPickupComponent)
+					{
+						WidgetPickupComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+						WidgetPickupComponent->SetupAttachment(SkeletalMeshComponent);
+					}
+					
+					RootComponent = SkeletalMeshComponent;
+				}
+			}
+			else
+			{
+				UE_LOG(LogTemp, Warning, TEXT("AMasterItem: Falha ao carregar SkeletalMesh para %s"), *GetName());
+			}
+		}
+		else
+		{
+			UE_LOG(LogTemp, Warning, TEXT("AMasterItem: SkeletalMesh não configurado para %s"), *GetName());
+		}
+		
+		// Desabilitar StaticMeshComponent
+		if (StaticMeshComponent)
+		{
+			StaticMeshComponent->SetVisibility(false);
+			StaticMeshComponent->SetActive(false);
+		}
 	}
 }
 
 void AMasterItem::SetupCollision()
 {
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-	{
-		MeshComp->SetCollisionResponseToChannel(ECC_Pawn, ECR_Overlap);
-		MeshComp->SetCollisionResponseToChannel(ECC_Camera, ECR_Ignore);
-		MeshComp->SetCollisionResponseToChannel(ECC_WorldStatic, ECR_Block);
-		MeshComp->SetCollisionResponseToChannel(ECC_WorldDynamic, ECR_Block);
-		MeshComp->SetCollisionResponseToChannel(ECC_PhysicsBody, ECR_Block);
-		MeshComp->SetCollisionResponseToChannel(ECC_Vehicle, ECR_Block);
-		MeshComp->SetCollisionResponseToChannel(ECC_Destructible, ECR_Block);
-	}
+	// Configuração já feita no construtor, mas podemos ajustar aqui se necessário
 }
 
 void AMasterItem::SetupCollisionSphere()
 {
-	if (!CollisionSphere)
+	if (CollisionSphere)
 	{
-		return;
+		UpdateCollisionSphereSize();
+		CollisionSphere->SetHiddenInGame(!CollisionSphereSettings.ShowOverlappingArea);
 	}
+}
 
-	float MeshRadius = 0.0f;
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-	{
-		FBoxSphereBounds Bounds = MeshComp->CalcBounds(MeshComp->GetComponentTransform());
-		FVector BoxExtent = Bounds.BoxExtent;
-		MeshRadius = FMath::Max3(BoxExtent.X, BoxExtent.Y, BoxExtent.Z);
-	}
+void AMasterItem::UpdateCollisionSphereSize()
+{
+	if (!CollisionSphere) return;
 
-	float SphereRadius = CollisionSphereSettings.MinimumSize;
+	FVector MeshBounds = FVector::ZeroVector;
 	
-	if (MeshRadius > CollisionSphereSettings.MinimumSize)
+	if (StaticMeshComponent && StaticMeshComponent->IsVisible() && StaticMeshComponent->GetStaticMesh())
 	{
-		SphereRadius = MeshRadius * 2.0f;
+		FBoxSphereBounds Bounds = StaticMeshComponent->GetStaticMesh()->GetBounds();
+		MeshBounds = Bounds.BoxExtent * 2.0f * STModel.Size;
+	}
+	else if (SkeletalMeshComponent && SkeletalMeshComponent->IsVisible() && SkeletalMeshComponent->GetSkeletalMeshAsset())
+	{
+		FBoxSphereBounds Bounds = SkeletalMeshComponent->GetSkeletalMeshAsset()->GetBounds();
+		MeshBounds = Bounds.BoxExtent * 2.0f * STModel.Size;
 	}
 
-	CollisionSphere->SetSphereRadius(SphereRadius);
-
-	if (CollisionSphereSettings.ShowOverlappingArea)
+	float MaxDimension = FMath::Max3(MeshBounds.X, MeshBounds.Y, MeshBounds.Z);
+	float SphereRadius;
+	
+	// Se o mesh for menor que o tamanho mínimo, usar o tamanho mínimo
+	// Caso contrário, usar o dobro do tamanho do mesh
+	if (MaxDimension < CollisionSphereSettings.MinimumSize)
 	{
-		CollisionSphere->SetHiddenInGame(false);
-		UpdateDebugMeshVisibility();
+		SphereRadius = CollisionSphereSettings.MinimumSize;
 	}
 	else
 	{
-		CollisionSphere->SetHiddenInGame(true);
-		
-		if (DebugMeshComponent)
-		{
-			DebugMeshComponent->SetVisibility(false);
-			DebugMeshComponent->SetHiddenInGame(true);
-			DebugMeshComponent->SetMaterial(0, nullptr);
-		}
+		SphereRadius = MaxDimension * 2.0f;
 	}
+	
+	CollisionSphere->SetSphereRadius(SphereRadius);
 }
 
 void AMasterItem::SetupLight()
 {
-	if (DirectionalLight)
+	if (SpotLight)
 	{
-		DirectionalLight->SetIntensity(LightSettings.Intensity);
-		DirectionalLight->SetAttenuationRadius(LightSettings.AttenuationRadius);
-		DirectionalLight->SetVisibility(false);
-		
-		if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-		{
-			FBoxSphereBounds MeshBounds = MeshComp->CalcBounds(MeshComp->GetComponentTransform());
-			FVector MeshSize = MeshBounds.BoxExtent;
-			
-			float MaxExtent = FMath::Max3(MeshSize.X, MeshSize.Y, MeshSize.Z);
-			float LightOffset = FMath::Max(MaxExtent * 0.1f, 10.0f);
-			
-			FVector LightOffsetPosition = FVector(0.0f, 0.0f, -MeshSize.Z - LightOffset);
-			DirectionalLight->SetRelativeLocation(LightOffsetPosition);
-		}
+		SpotLight->SetRelativeRotation(FRotator(-90.0f, 0.0f, 0.0f));
+		SpotLight->SetIntensity(LightSettings.Intensity);
+		SpotLight->SetAttenuationRadius(LightSettings.AttenuationRadius);
+		SpotLight->SetLightColor(GetRarityColor());
+		SpotLight->SetVisibility(false);
 	}
 }
 
-void AMasterItem::UpdatePhysics()
+void AMasterItem::SetupWidgets()
 {
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
+	if (WidgetInstructionComponent)
 	{
-		bool bShouldDisablePhysics = bIsFloating || FloatingSettings.AlwaysFloating || (RotationSettings.AlwaysRotate && FloatingSettings.AlwaysFloating);
-		
-		if (bShouldDisablePhysics)
+		WidgetInstructionComponent->SetWidgetSpace(EWidgetSpace::Screen);
+		WidgetInstructionComponent->SetDrawSize(WidgetsSettings.WidgetInstructionSize);
+		// Garantir que não está anexado a nenhum componente
+		WidgetInstructionComponent->DetachFromComponent(FDetachmentTransformRules::KeepWorldTransform);
+		// WidgetInstruction usa posição fixa no mundo, não relativa ao item
+		WidgetInstructionWorldLocation = GetActorLocation() + WidgetsSettings.WidgetInstructionPosition;
+		WidgetInstructionComponent->SetWorldLocation(WidgetInstructionWorldLocation);
+		if (WidgetsSettings.WidgetInstruction)
 		{
-			MeshComp->SetSimulatePhysics(false);
+			WidgetInstructionComponent->SetWidgetClass(WidgetsSettings.WidgetInstruction);
 		}
-		else
+		WidgetInstructionComponent->SetVisibility(false);
+	}
+
+	if (WidgetPickupComponent)
+	{
+		WidgetPickupComponent->SetWidgetSpace(EWidgetSpace::Screen);
+		WidgetPickupComponent->SetDrawSize(WidgetsSettings.WidgetPickupSize);
+		WidgetPickupComponent->SetRelativeLocation(WidgetsSettings.WidgetPickupPosition);
+		if (WidgetsSettings.WidgetPickup)
 		{
-			MeshComp->SetSimulatePhysics(true);
+			WidgetPickupComponent->SetWidgetClass(WidgetsSettings.WidgetPickup);
 		}
+		WidgetPickupComponent->SetVisibility(false);
 	}
 }
 
 void AMasterItem::UpdateFloating(float DeltaTime)
 {
-	if (!FloatingSettings.Floating && !FloatingSettings.AlwaysFloating)
+	if (!FloatingSettings.Floating) return;
+
+	UStaticMeshComponent* ActiveMesh = StaticMeshComponent && StaticMeshComponent->IsVisible() ? StaticMeshComponent : nullptr;
+	USkeletalMeshComponent* ActiveSkeletalMesh = SkeletalMeshComponent && SkeletalMeshComponent->IsVisible() ? SkeletalMeshComponent : nullptr;
+
+	if (!ActiveMesh && !ActiveSkeletalMesh) return;
+
+	// Ativar floating
+	if (!bIsFloating)
 	{
-		if (bIsFloating)
+		bIsFloating = true;
+		if (ActiveMesh)
 		{
-			bIsFloating = false;
-			UpdatePhysics();
+			ActiveMesh->SetSimulatePhysics(false);
 		}
-		return;
+		if (ActiveSkeletalMesh)
+		{
+			ActiveSkeletalMesh->SetSimulatePhysics(false);
+		}
+		OriginalLocation = GetActorLocation();
 	}
 
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-	{
-		bool bShouldFloat = FloatingSettings.AlwaysFloating || (ActivePlayer != nullptr && FloatingSettings.Floating);
-
-		if (bShouldFloat && !bIsFloating)
-		{
-			bIsFloating = true;
-			
-			FVector BaseLocation;
-			if (bHasTouchedSurface)
-			{
-				BaseLocation = SurfaceContactPoint;
-				InitialMeshLocation = SurfaceContactPoint;
-			}
-			else
-			{
-				BaseLocation = MeshComp->GetComponentLocation();
-				InitialMeshLocation = BaseLocation;
-			}
-			
-			CurrentFloatingLocation = MeshComp->GetComponentLocation();
-			TargetFloatingLocation = BaseLocation + FVector(0.0f, 0.0f, FloatingSettings.Height);
-			UpdatePhysics();
-		}
-		else if (!bShouldFloat && bIsFloating)
-		{
-			bIsFloating = false;
-			UpdatePhysics();
-		}
-
-		if (bIsFloating)
-		{
-			FVector BaseLocation = bHasTouchedSurface ? SurfaceContactPoint : InitialMeshLocation;
-			TargetFloatingLocation = BaseLocation + FVector(0.0f, 0.0f, FloatingSettings.Height);
-			
-			CurrentFloatingLocation = FMath::VInterpTo(
-				CurrentFloatingLocation,
-				TargetFloatingLocation,
-				DeltaTime,
-				FloatingSettings.FloatingTransitionSpeed
-			);
-
-			MeshComp->SetWorldLocation(CurrentFloatingLocation);
-		}
-	}
+	// Interpolar altura
+	float TargetHeight = OriginalLocation.Z + FloatingSettings.Height;
+	FVector CurrentLocation = GetActorLocation();
+	FVector TargetLocation = FVector(CurrentLocation.X, CurrentLocation.Y, TargetHeight);
+	FVector NewLocation = FMath::VInterpTo(CurrentLocation, TargetLocation, DeltaTime, FloatingSettings.FloatingTransitionSpeed);
+	
+	SetActorLocation(NewLocation);
 }
 
 void AMasterItem::UpdateRotation(float DeltaTime)
 {
-	if (!RotationSettings.Rotate && !(RotationSettings.AlwaysRotate && FloatingSettings.AlwaysFloating))
-	{
-		return;
-	}
+	if (!RotationSettings.Rotate) return;
 
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-	{
-		bool bShouldRotate = (RotationSettings.AlwaysRotate && FloatingSettings.AlwaysFloating) || 
-			(ActivePlayer != nullptr && RotationSettings.Rotate && (FloatingSettings.Floating || FloatingSettings.AlwaysFloating || bIsFloating));
+	bool bEasyModeActive = BasicInfos.EasyMode;
 
-		if (bShouldRotate)
+	// Em EasyMode, pular o reset e começar a rotacionar diretamente
+	if (bEasyModeActive)
+	{
+		if (!bIsRotating)
 		{
-			if (MeshComp->IsSimulatingPhysics())
+			bIsRotating = true;
+			bIsResettingRotation = false;
+		}
+	}
+	else
+	{
+		// Se precisa resetar e ainda não terminou o reset
+		if (RotationSettings.Reset && !bIsResettingRotation && !bIsRotating)
+		{
+			bIsResettingRotation = true;
+		}
+
+		// Se está resetando, interpolar para zero
+		if (bIsResettingRotation)
+		{
+			FRotator CurrentRot = GetActorRotation();
+			FRotator TargetRotation = FRotator::ZeroRotator;
+			
+			// Interpolar para a rotação zero
+			FRotator NewRotation = FMath::RInterpTo(CurrentRot, TargetRotation, DeltaTime, RotationSettings.ResetSpeed);
+			SetActorRotation(NewRotation);
+			
+			// Verificar se chegou perto de zero
+			if (FMath::IsNearlyEqual(NewRotation.Yaw, 0.0f, 1.0f) &&
+				FMath::IsNearlyEqual(NewRotation.Pitch, 0.0f, 1.0f) &&
+				FMath::IsNearlyEqual(NewRotation.Roll, 0.0f, 1.0f))
 			{
-				MeshComp->SetSimulatePhysics(false);
-			}
-
-			if (RotationSettings.Reset && !bIsResettingRotation && !(RotationSettings.AlwaysRotate && FloatingSettings.AlwaysFloating) && !bHasResetRotation)
-			{
-				FRotator CurrentMeshRotation = MeshComp->GetComponentRotation();
-				if (!CurrentMeshRotation.IsNearlyZero(5.0f))
-				{
-					bIsResettingRotation = true;
-					bHasResetRotation = true;
-					CurrentRotation = CurrentMeshRotation;
-				}
-				else
-				{
-					bHasResetRotation = true;
-					CurrentRotation = FRotator::ZeroRotator;
-					MeshComp->SetWorldRotation(FRotator::ZeroRotator);
-				}
-			}
-
-			if (bIsResettingRotation)
-			{
-				CurrentRotation = FMath::RInterpTo(
-					CurrentRotation,
-					FRotator::ZeroRotator,
-					DeltaTime,
-					RotationSettings.ResetSpeed
-				);
-
-				MeshComp->SetWorldRotation(CurrentRotation);
-
-				if (CurrentRotation.IsNearlyZero(1.0f))
-				{
-					bIsResettingRotation = false;
-					CurrentRotation = FRotator::ZeroRotator;
-					MeshComp->SetWorldRotation(FRotator::ZeroRotator);
-				}
+				// Reset completo, pode começar a rotacionar
+				SetActorRotation(TargetRotation); // Garantir que está exatamente em zero
+				bIsResettingRotation = false;
+				bIsRotating = true;
 			}
 			else
 			{
-				FRotator RotationDelta = FRotator::ZeroRotator;
-
-				switch (RotationSettings.DirectionRotation)
-				{
-				case ERotationDirection::X:
-					RotationDelta.Roll = RotationSettings.RotationSpeed * DeltaTime;
-					break;
-				case ERotationDirection::Y:
-					RotationDelta.Yaw = RotationSettings.RotationSpeed * DeltaTime;
-					break;
-				case ERotationDirection::Z:
-					RotationDelta.Pitch = RotationSettings.RotationSpeed * DeltaTime;
-					break;
-				}
-
-				MeshComp->AddLocalRotation(RotationDelta);
-				CurrentRotation = MeshComp->GetComponentRotation();
+				// Ainda está resetando, não rotacionar ainda
+				return;
 			}
 		}
-		else if (!(RotationSettings.AlwaysRotate && FloatingSettings.AlwaysFloating))
+
+		// Se não precisa resetar e ainda não começou a rotacionar, começar agora
+		if (!RotationSettings.Reset && !bIsRotating)
 		{
-			bIsResettingRotation = false;
-			bHasResetRotation = false;
-			
-			if (MeshComp->IsSimulatingPhysics())
-			{
-				MeshComp->SetEnableGravity(true);
-			}
+			bIsRotating = true;
+			OriginalRotation = GetActorRotation();
 		}
+	}
+
+	// Agora rotacionar
+	if (bIsRotating)
+	{
+		FRotator CurrentRot = GetActorRotation();
+		FRotator DeltaRotation = FRotator::ZeroRotator;
+
+		float RotationDelta = RotationSettings.RotationSpeed * DeltaTime;
+
+		switch (RotationSettings.DirectionRotation)
+		{
+		case EDirectionRotation::X:
+			DeltaRotation.Roll = RotationDelta;
+			break;
+		case EDirectionRotation::Y:
+			DeltaRotation.Yaw = RotationDelta;
+			break;
+		case EDirectionRotation::Z:
+			DeltaRotation.Pitch = RotationDelta;
+			break;
+		}
+
+		FRotator NewRotation = CurrentRot + DeltaRotation;
+		SetActorRotation(NewRotation);
 	}
 }
 
 void AMasterItem::UpdateLight()
 {
-	if (!LightSettings.Light && !LightSettings.AlwaysLight)
+	if (!LightSettings.Light) return;
+
+	if (SpotLight)
 	{
-		if (DirectionalLight)
+		if (!bIsLightOn)
 		{
-			DirectionalLight->SetVisibility(false);
+			bIsLightOn = true;
+			SpotLight->SetVisibility(true);
+			SpotLight->SetLightColor(GetRarityColor());
 		}
-		return;
-	}
-
-	bool bShouldLight = (LightSettings.AlwaysLight && FloatingSettings.AlwaysFloating) || 
-	                    (ActivePlayer != nullptr && (LightSettings.Light || LightSettings.AlwaysLight));
-
-	if (DirectionalLight)
-	{
-		if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
+		// Garantir que a luz permaneça acesa
+		if (!SpotLight->IsVisible())
 		{
-			FBoxSphereBounds MeshBounds = MeshComp->CalcBounds(MeshComp->GetComponentTransform());
-			FVector MeshSize = MeshBounds.BoxExtent;
-			
-			float MaxExtent = FMath::Max3(MeshSize.X, MeshSize.Y, MeshSize.Z);
-			float LightOffset = FMath::Max(MaxExtent * 0.1f, 10.0f);
-			
-			FVector LightOffsetPosition = FVector(0.0f, 0.0f, -MeshSize.Z - LightOffset);
-			DirectionalLight->SetRelativeLocation(LightOffsetPosition);
-		}
-		
-		if (bShouldLight)
-		{
-			DirectionalLight->SetVisibility(true);
-			DirectionalLight->SetIntensity(LightSettings.Intensity);
-			DirectionalLight->SetAttenuationRadius(LightSettings.AttenuationRadius);
-
-			FLinearColor RarityColor = GetRarityColor();
-			DirectionalLight->SetLightColor(RarityColor);
-		}
-		else
-		{
-			DirectionalLight->SetVisibility(false);
+			SpotLight->SetVisibility(true);
 		}
 	}
 }
 
-void AMasterItem::UpdateDebugMeshVisibility()
+void AMasterItem::UpdateWidgets()
 {
-	if (!DebugMeshComponent || !CollisionSphereSettings.ShowOverlappingArea)
-	{
-		return;
-	}
+	// Verificar se o player local está na lista de overlapping players
+	APlayerController* LocalPlayerController = GetWorld() ? GetWorld()->GetFirstPlayerController() : nullptr;
+	ACharacter* LocalPlayerCharacter = LocalPlayerController ? Cast<ACharacter>(LocalPlayerController->GetPawn()) : nullptr;
+	
+	bool bLocalPlayerIsOverlapping = LocalPlayerCharacter && OverlappingPlayers.Contains(LocalPlayerCharacter);
 
-	if (ActivePlayer != nullptr)
+	if (bLocalPlayerIsOverlapping)
 	{
-		DebugMeshComponent->SetVisibility(true);
-		DebugMeshComponent->SetHiddenInGame(false);
-		
-		static UMaterial* GreenMaterial = LoadObject<UMaterial>(nullptr, TEXT("/Engine/EditorMaterials/WidgetMaterial_G"));
-		if (GreenMaterial)
+		if (WidgetInstructionComponent && WidgetsSettings.WidgetInstruction)
 		{
-			DebugMeshComponent->SetMaterial(0, GreenMaterial);
+			WidgetInstructionComponent->SetVisibility(true);
+		}
+
+		if (WidgetPickupComponent && WidgetsSettings.WidgetPickup)
+		{
+			WidgetPickupComponent->SetVisibility(true);
 		}
 	}
 	else
 	{
-		DebugMeshComponent->SetVisibility(false);
-		DebugMeshComponent->SetHiddenInGame(true);
-		DebugMeshComponent->SetMaterial(0, nullptr);
+		// Esconder widgets se o player local não está overlapping
+		if (WidgetInstructionComponent)
+		{
+			WidgetInstructionComponent->SetVisibility(false);
+		}
+		if (WidgetPickupComponent)
+		{
+			WidgetPickupComponent->SetVisibility(false);
+		}
 	}
 }
 
-UPrimitiveComponent* AMasterItem::GetActiveMeshComponent() const
+void AMasterItem::OnCollisionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
 {
-	if (STModel.MeshType == EItemMeshType::Static)
+	if (ACharacter* Character = Cast<ACharacter>(OtherActor))
 	{
-		return StaticMeshComponent;
+		// Se já houver um player na lista, ignorar completamente este evento
+		if (OverlappingPlayers.Num() > 0)
+		{
+			return;
+		}
+		
+		// Verificar se o player está em cooldown
+		if (PlayerCooldowns.Contains(Character))
+		{
+			float CurrentTime = GetWorld()->GetTimeSeconds();
+			float CooldownEndTime = PlayerCooldowns[Character];
+			if ((CurrentTime - CooldownEndTime) < OverlapCooldownTime)
+			{
+				// Player ainda está em cooldown, ignorar
+				return;
+			}
+			else
+			{
+				// Cooldown expirado, remover do mapa
+				PlayerCooldowns.Remove(Character);
+			}
+		}
+		
+		// Verificar se o player já está na lista (não deveria estar, mas verificação de segurança)
+		if (!OverlappingPlayers.Contains(Character))
+		{
+			// Adicionar à lista (garantido que está vazia)
+			OverlappingPlayers.Add(Character);
+			
+			// Inicializar estados para o primeiro player
+			OriginalLocation = GetActorLocation();
+			OriginalRotation = GetActorRotation();
+			CurrentRotation = OriginalRotation;
+			// Resetar flags de rotação para que reset aconteça antes de começar a rotacionar
+			bIsRotating = false;
+			bIsResettingRotation = false;
+		}
 	}
-	else
+}
+
+void AMasterItem::OnCollisionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
+{
+	if (ACharacter* Character = Cast<ACharacter>(OtherActor))
 	{
-		return SkeletalMeshComponent;
+		// Só processar se o player estiver na lista (apenas o player autorizado)
+		if (OverlappingPlayers.Contains(Character))
+		{
+			// Remover da lista (só pode haver um player por vez)
+			OverlappingPlayers.Remove(Character);
+			
+			// Registrar o tempo de saída para iniciar o cooldown
+			float CurrentTime = GetWorld()->GetTimeSeconds();
+			PlayerCooldowns.Add(Character, CurrentTime);
+			
+			// Os efeitos serão desativados no Tick quando não houver mais players
+		}
+	}
+}
+
+void AMasterItem::ValidateItemData()
+{
+	// Validar Name
+	if (Name.IsEmpty())
+	{
+		UE_LOG(LogTemp, Warning, TEXT("AMasterItem: Name está vazio! Item será destruído."));
+		Destroy();
+		return;
+	}
+
+	// Validar Quantity
+	if (Quantity <= 0)
+	{
+		Quantity = 1;
+	}
+
+	// Se não é stackable, força quantidade = 1
+	if (!STQty.Stackable)
+	{
+		Quantity = 1;
+	}
+	else if (Quantity > STQty.MaxQty)
+	{
+		Quantity = STQty.MaxQty;
 	}
 }
 
@@ -727,257 +668,20 @@ FLinearColor AMasterItem::GetRarityColor() const
 {
 	switch (STInfos.Rarity)
 	{
-	case EItemRarity::None:
-		return FLinearColor::White;
-	case EItemRarity::Prototype:
+	case EItemRarity::Prototype:	// Amarelo
 		return FLinearColor(1.0f, 0.84f, 0.0f, 1.0f);
-	case EItemRarity::Unstable:
+	case EItemRarity::Unstable:		// Verde
 		return FLinearColor(0.0f, 1.0f, 0.0f, 1.0f);
-	case EItemRarity::Stable:
+	case EItemRarity::Stable:		// Azul
 		return FLinearColor(0.0f, 0.5f, 1.0f, 1.0f);
-	case EItemRarity::Enhanced:
-		return FLinearColor::White;
-	case EItemRarity::Quantum:
+	case EItemRarity::Enhanced:		// Branco
+		return FLinearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	case EItemRarity::Quantum:		// Laranja
 		return FLinearColor(1.0f, 0.5f, 0.0f, 1.0f);
-	case EItemRarity::Singularity:
+	case EItemRarity::Singularity:	// Vermelho
 		return FLinearColor(1.0f, 0.0f, 0.0f, 1.0f);
 	default:
 		return FLinearColor::White;
-	}
-}
-
-bool AMasterItem::IsPlayerOrCamera(AActor* Actor) const
-{
-	if (!IsValid(Actor) || Actor->IsTemplate())
-	{
-		return false;
-	}
-
-	if (Cast<ACharacter>(Actor))
-	{
-		return true;
-	}
-
-	if (Actor->GetComponentByClass<UCameraComponent>())
-	{
-		return true;
-	}
-
-	return false;
-}
-
-void AMasterItem::ProcessNextInQueue()
-{
-	while (WaitingQueue.Num() > 0 && ActivePlayer == nullptr)
-	{
-		AActor* NextPlayer = WaitingQueue[0];
-		WaitingQueue.RemoveAt(0);
-
-		if (!NextPlayer || !IsValid(NextPlayer))
-		{
-			continue;
-		}
-
-		if (!PlayersInRange.Contains(NextPlayer))
-		{
-			continue;
-		}
-
-		if (IsPlayerInCooldown(NextPlayer))
-		{
-			continue;
-		}
-
-		ActivePlayer = NextPlayer;
-		UpdateLight();
-		UpdateDebugMeshVisibility();
-		
-		return;
-	}
-}
-
-void AMasterItem::OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult)
-{
-	if (IsPlayerOrCamera(OtherActor))
-	{
-		if (IsPlayerInCooldown(OtherActor))
-		{
-			return;
-		}
-
-		if (GetWorld())
-		{
-			FTimerHandle* TimerHandle = PlayerCooldownTimers.Find(OtherActor);
-			if (TimerHandle && TimerHandle->IsValid())
-			{
-				GetWorld()->GetTimerManager().ClearTimer(*TimerHandle);
-				PlayerCooldownTimers.Remove(OtherActor);
-			}
-		}
-
-		PlayersInRange.Add(OtherActor);
-
-		if (ActivePlayer != nullptr && ActivePlayer != OtherActor)
-		{
-			if (!WaitingQueue.Contains(OtherActor))
-			{
-				WaitingQueue.Add(OtherActor);
-			}
-			return;
-		}
-
-		if (ActivePlayer == nullptr)
-		{
-			WaitingQueue.Remove(OtherActor);
-			ActivePlayer = OtherActor;
-			UpdateLight();
-			UpdateDebugMeshVisibility();
-		}
-	}
-}
-
-void AMasterItem::OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex)
-{
-	if (IsPlayerOrCamera(OtherActor))
-	{
-		WaitingQueue.Remove(OtherActor);
-
-		if (ActivePlayer != nullptr && ActivePlayer != OtherActor)
-		{
-			PlayersInRange.Remove(OtherActor);
-			return;
-		}
-
-		if (!PlayersInRange.Contains(OtherActor))
-		{
-			return;
-		}
-
-		bool bWasActivePlayer = (ActivePlayer == OtherActor);
-		PlayersInRange.Remove(OtherActor);
-
-		if (bWasActivePlayer)
-		{
-			ActivePlayer = nullptr;
-			ProcessNextInQueue();
-		}
-
-		UpdateLight();
-		UpdateDebugMeshVisibility();
-
-		if (bWasActivePlayer && GetWorld())
-		{
-			FTimerHandle* ExistingTimer = PlayerCooldownTimers.Find(OtherActor);
-			if (ExistingTimer && ExistingTimer->IsValid())
-			{
-				GetWorld()->GetTimerManager().ClearTimer(*ExistingTimer);
-			}
-
-			FTimerHandle NewTimerHandle;
-			GetWorld()->GetTimerManager().SetTimer(
-				NewTimerHandle,
-				FTimerDelegate::CreateUObject(this, &AMasterItem::OnOverlapCooldownFinished, OtherActor),
-				5.0f,
-				false
-			);
-			PlayerCooldownTimers.Add(OtherActor, NewTimerHandle);
-		}
-	}
-}
-
-bool AMasterItem::IsPlayerInCooldown(AActor* PlayerActor) const
-{
-	if (!PlayerActor || !GetWorld())
-	{
-		return false;
-	}
-
-	const FTimerHandle* TimerHandle = PlayerCooldownTimers.Find(PlayerActor);
-	if (TimerHandle && TimerHandle->IsValid())
-	{
-		return true;
-	}
-
-	return false;
-}
-
-void AMasterItem::OnOverlapCooldownFinished(AActor* PlayerActor)
-{
-	if (PlayerActor && GetWorld())
-	{
-		FTimerHandle* TimerHandle = PlayerCooldownTimers.Find(PlayerActor);
-		if (TimerHandle)
-		{
-			PlayerCooldownTimers.Remove(PlayerActor);
-		}
-	}
-}
-
-void AMasterItem::OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit)
-{
-	if (!HitComp || !IsValid(this))
-	{
-		return;
-	}
-
-	if (!IsValid(OtherActor) || OtherActor->IsTemplate())
-	{
-		return;
-	}
-
-	if (IsPlayerOrCamera(OtherActor))
-	{
-		return;
-	}
-
-	if (UPrimitiveComponent* MeshComp = GetActiveMeshComponent())
-	{
-		if (!IsValid(MeshComp))
-		{
-			return;
-		}
-
-		if (!bHasTouchedSurface)
-		{
-			SurfaceContactPoint = MeshComp->GetComponentLocation();
-			bHasTouchedSurface = true;
-			InitialMeshLocation = SurfaceContactPoint;
-		}
-	}
-}
-
-void AMasterItem::ProcessItemPickup(AActor* PlayerActor)
-{
-	if (!PlayerActor || !IsValid(PlayerActor))
-	{
-		return;
-	}
-
-	if (ActivePlayer != PlayerActor)
-	{
-		return;
-	}
-
-	APlayerController* PlayerController = nullptr;
-	if (ACharacter* PlayerCharacter = Cast<ACharacter>(PlayerActor))
-	{
-		PlayerController = Cast<APlayerController>(PlayerCharacter->GetController());
-	}
-	else if (APlayerController* PC = Cast<APlayerController>(PlayerActor))
-	{
-		PlayerController = PC;
-	}
-
-	if (PlayerController && GEngine)
-	{
-		FString PickupMessage = FString::Printf(TEXT("pegou %s %dx"), *Name, Quantity);
-		
-		GEngine->AddOnScreenDebugMessage(
-			-1,
-			3.0f,
-			FColor::Green,
-			PickupMessage
-		);
 	}
 }
 
