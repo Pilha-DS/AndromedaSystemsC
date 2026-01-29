@@ -1,8 +1,4 @@
-// Version: 1.0.0
-// Author: Pilha-DS
-// Creation Date: 2026-01-27 // Last Update: 2026-01-27
-// Description: Structures for the Dynamic Items system
-// Company: Pilha-DS // copyright (c) 2026 Pilha-DS. All Rights Reserved.
+// Dynamic item system // Version 1.0.0 // date: 2026-01-29 // last update: 2026-01-29 // Author: Pilha-DS // Actor: MasterItem
 
 #pragma once
 
@@ -11,46 +7,61 @@
 #include "Components/StaticMeshComponent.h"
 #include "Components/SkeletalMeshComponent.h"
 #include "Components/SphereComponent.h"
-#include "Components/PointLightComponent.h"
-#include "Engine/Engine.h"
-#include "../Structures/ItemStructures.h"
+#include "Components/SpotLightComponent.h"
+#include "Components/WidgetComponent.h"
+#include "AndromedaSystemsC/DynamicItems/Structure/ItemStructures.h"
 #include "MasterItem.generated.h"
 
+class UStaticMeshComponent;
+class USkeletalMeshComponent;
+class USphereComponent;
+class USpotLightComponent;
+class UWidgetComponent;
+class ACharacter;
+
+/**
+ * Classe base para todos os itens do jogo
+ * Responsável por dados do item, visualização no mundo, interações e replicação em multiplayer
+ */
 UCLASS(BlueprintType, Blueprintable)
 class ANDROMEDA_API AMasterItem : public AActor
 {
 	GENERATED_BODY()
-
-public:
+	
+public:	
 	AMasterItem(const FObjectInitializer& ObjectInitializer);
 
 protected:
 	virtual void BeginPlay() override;
 	virtual void Tick(float DeltaTime) override;
-	virtual void PostInitializeComponents() override;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UStaticMeshComponent* StaticMeshComponent;
+	// Componentes
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UStaticMeshComponent> StaticMeshComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	USkeletalMeshComponent* SkeletalMeshComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USkeletalMeshComponent> SkeletalMeshComponent;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	USphereComponent* CollisionSphere;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USphereComponent> CollisionSphere;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UPointLightComponent* DirectionalLight;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<USpotLightComponent> SpotLight;
 
-	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components")
-	UStaticMeshComponent* DebugMeshComponent;
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UWidgetComponent> WidgetInstructionComponent;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item", Replicated)
+	UPROPERTY(VisibleAnywhere, BlueprintReadOnly, Category = "Components", meta = (AllowPrivateAccess = "true"))
+	TObjectPtr<UWidgetComponent> WidgetPickupComponent;
+
+	// Dados do Item
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Item")
 	FString Name;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item", Replicated)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Item")
 	FString ID;
 
-	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item", Replicated)
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Replicated, Category = "Item", meta = (ClampMin = "1"))
 	int32 Quantity = 1;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
@@ -61,6 +72,10 @@ protected:
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "Item")
 	FSTInfos STInfos;
+
+	// WorldView Settings
+	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WorldView")
+	FBasicInfos BasicInfos;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WorldView")
 	FFloatingSettings FloatingSettings;
@@ -75,61 +90,54 @@ protected:
 	FCollisionSphereSettings CollisionSphereSettings;
 
 	UPROPERTY(EditAnywhere, BlueprintReadWrite, Category = "WorldView")
-	TSoftObjectPtr<UStaticMesh> EditorDebugMesh;
+	FWidgetsSettings WidgetsSettings;
 
-	FVector InitialMeshLocation;
-	FRotator InitialMeshRotation;
-	TSet<AActor*> PlayersInRange;
-	AActor* ActivePlayer = nullptr;
-	TArray<AActor*> WaitingQueue;
-	bool bWasEPressedLastFrame = false;
-	bool bIsFloating = false;
-	bool bIsResettingRotation = false;
-	bool bHasResetRotation = false;
+	// Estados internos
+	TArray<ACharacter*> OverlappingPlayers;
+	TMap<ACharacter*, float> PlayerCooldowns; // Mapa de players e seus tempos de cooldown
+	float OverlapCooldownTime = 5.0f; // Tempo de cooldown em segundos
+	FVector OriginalLocation;
+	FRotator OriginalRotation;
 	FRotator CurrentRotation;
-	FVector TargetFloatingLocation;
-	FVector CurrentFloatingLocation;
-	FVector SurfaceContactPoint;
-	bool bHasTouchedSurface = false;
-	TMap<AActor*, FTimerHandle> PlayerCooldownTimers;
+	float CurrentFloatingHeight = 0.0f;
+	bool bIsFloating = false;
+	bool bIsRotating = false;
+	bool bIsResettingRotation = false;
+	bool bIsLightOn = false;
+	FVector WidgetInstructionWorldLocation; // Posição fixa do widget no mundo
 
-	void ValidateItemProperties();
+	// Funções de configuração
 	void SetupMesh();
-	void SetupPhysics();
 	void SetupCollision();
 	void SetupCollisionSphere();
 	void SetupLight();
-	UPrimitiveComponent* GetActiveMeshComponent() const;
-	FLinearColor GetRarityColor() const;
-	void UpdatePhysics();
+	void SetupWidgets();
+	void UpdateCollisionSphereSize();
+
+	// Funções de comportamento
 	void UpdateFloating(float DeltaTime);
 	void UpdateRotation(float DeltaTime);
 	void UpdateLight();
-	void UpdateDebugMeshVisibility();
-	void ProcessNextInQueue();
+	void UpdateWidgets();
+
+	// Overlap Events
+	UFUNCTION()
+	void OnCollisionSphereBeginOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
 
 	UFUNCTION()
-	void OnOverlapBegin(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex, bool bFromSweep, const FHitResult& SweepResult);
+	void OnCollisionSphereEndOverlap(UPrimitiveComponent* OverlappedComponent, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
 
-	UFUNCTION()
-	void OnOverlapEnd(UPrimitiveComponent* OverlappedComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, int32 OtherBodyIndex);
+	// Validação
+	void ValidateItemData();
+	FLinearColor GetRarityColor() const;
 
-	UFUNCTION()
-	void OnOverlapCooldownFinished(AActor* PlayerActor);
-
-	bool IsPlayerInCooldown(AActor* PlayerActor) const;
-
-	UFUNCTION()
-	void OnHit(UPrimitiveComponent* HitComp, AActor* OtherActor, UPrimitiveComponent* OtherComp, FVector NormalImpulse, const FHitResult& Hit);
-
-	bool IsPlayerOrCamera(AActor* Actor) const;
-	void ProcessItemPickup(AActor* PlayerActor);
-
-public:
+	// Replicação
 	virtual void GetLifetimeReplicatedProps(TArray<FLifetimeProperty>& OutLifetimeProps) const override;
 
+public:
+	// Getters
 	FORCEINLINE UStaticMeshComponent* GetStaticMeshComponent() const { return StaticMeshComponent; }
 	FORCEINLINE USkeletalMeshComponent* GetSkeletalMeshComponent() const { return SkeletalMeshComponent; }
 	FORCEINLINE USphereComponent* GetCollisionSphere() const { return CollisionSphere; }
-	FORCEINLINE UPointLightComponent* GetDirectionalLight() const { return DirectionalLight; }
+	FORCEINLINE USpotLightComponent* GetSpotLight() const { return SpotLight; }
 };
